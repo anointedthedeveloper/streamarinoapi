@@ -7,16 +7,40 @@ const PORT = 3000;
 
 const BLOCKED = ['google-analytics', 'firebase', 'hisavana', 'doubleclick', 'googlesyndication', 'adservice', 'analytics', 'firebaselogging', 'firebaseinstallations'];
 
-let browser, streamPage;
+let browser;
+const streamPages = [];
+const MAX_PAGES = 3;
+const queue = [];
+let activeJobs = 0;
 
 async function initBrowser() {
   browser = await chromium.launch({ headless: true });
-  streamPage = await browser.newPage();
-  await streamPage.route('**/*', route => {
-    if (BLOCKED.some(b => route.request().url().includes(b))) return route.abort();
-    route.continue();
+  for (let i = 0; i < MAX_PAGES; i++) {
+    const page = await browser.newPage();
+    await page.route('**/*', route => {
+      if (BLOCKED.some(b => route.request().url().includes(b))) return route.abort();
+      route.continue();
+    });
+    streamPages.push({ page, busy: false });
+  }
+  console.log(`Browser ready with ${MAX_PAGES} stream pages`);
+}
+
+function getFreePage() {
+  return new Promise(resolve => {
+    const slot = streamPages.find(p => !p.busy);
+    if (slot) { slot.busy = true; return resolve(slot); }
+    queue.push(resolve);
   });
-  console.log('Browser ready');
+}
+
+function releasePage(slot) {
+  slot.busy = false;
+  if (queue.length > 0) {
+    const next = queue.shift();
+    slot.busy = true;
+    next(slot);
+  }
 }
 
 // Plain HTTPS GET
@@ -112,6 +136,8 @@ async function getDetail(slug) {
     imdbRating: s.imdbRatingValue,
     imdbRatingCount: s.imdbRatingCount,
     subtitles: s.subtitles ? s.subtitles.split(',') : [],
+    availableDubs: (s.dubs || []).filter(d => d.type === 0).map(d => ({ lang: d.lanCode, name: d.lanName, slug: d.detailPath, subjectId: d.subjectId })),
+    availableSubs: (s.dubs || []).filter(d => d.type === 1).map(d => ({ lang: d.lanCode, name: d.lanName, slug: d.detailPath, subjectId: d.subjectId })),
     dubs: s.dubs || [],
     cover: s.cover?.url || null,
     trailer: s.trailer?.videoAddress?.url || null,
@@ -127,10 +153,28 @@ async function getDetail(slug) {
 }
 
 // Extract stream URLs using persistent Playwright page
-async function extractStreams(slug, se = '', ep = '') {
+async function extractStreams(slug, se, ep, lang) {
   const detail = await getDetail(slug);
-  const playerUrl = `https://123movienow.cc/spa/videoPlayPage/movies/${detail.slug}?id=${detail.subjectId}&type=/movie/detail&detailSe=${se}&detailEp=${ep}&lang=en`;
 
+  // For movies: use se=0&ep=1 if not specified
+  let finalSe = se;
+  let finalEp = ep;
+  if (detail.type === 'movie') {
+    finalSe = se || '0';
+    finalEp = ep || '1';
+  }
+
+  // If lang requested, find matching dub slug
+  let streamSlug = detail.slug;
+  let streamId = detail.subjectId;
+  if (lang && lang !== 'en') {
+    const dub = detail.dubs.find(d => d.lanCode === lang || d.lanName.toLowerCase().includes(lang.toLowerCase()));
+    if (dub) { streamSlug = dub.detailPath; streamId = dub.subjectId; }
+  }
+
+  const playerUrl = `https://123movienow.cc/spa/videoPlayPage/movies/${streamSlug}?id=${streamId}&type=/movie/detail&detailSe=${finalSe}&detailEp=${finalEp}&lang=en`;
+
+  const slot = await getFreePage();
   const seen = new Set();
   const streams = [];
 
@@ -142,31 +186,31 @@ async function extractStreams(slug, se = '', ep = '') {
     }
   };
 
-  streamPage.on('request', handler);
-
-  await streamPage.goto(playerUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-
+  slot.page.on('request', handler);
   try {
-    const playBtn = streamPage.locator('.vjs-big-play-button').first();
-    await playBtn.waitFor({ timeout: 5000 });
-    await playBtn.click();
-  } catch {}
+    await slot.page.goto(playerUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    try {
+      const playBtn = slot.page.locator('.vjs-big-play-button').first();
+      await playBtn.waitFor({ timeout: 5000 });
+      await playBtn.click();
+    } catch {}
 
-  // Resolve as soon as first stream URL found, max 20s
-  await new Promise(resolve => {
-    const interval = setInterval(() => {
-      if (streams.length > 0) { clearInterval(interval); clearTimeout(timer); resolve(); }
-    }, 300);
-    const timer = setTimeout(() => { clearInterval(interval); resolve(); }, 20000);
-  });
-
-  streamPage.off('request', handler);
+    await new Promise(resolve => {
+      const interval = setInterval(() => {
+        if (streams.length > 0) { clearInterval(interval); clearTimeout(timer); resolve(); }
+      }, 300);
+      const timer = setTimeout(() => { clearInterval(interval); resolve(); }, 20000);
+    });
+  } finally {
+    slot.page.off('request', handler);
+    releasePage(slot);
+  }
 
   return {
     title: detail.title,
     type: detail.type,
-    season: se || null,
-    episode: ep || null,
+    season: finalSe || null,
+    episode: finalEp || null,
     playerUrl,
     streams
   };
@@ -192,10 +236,11 @@ app.get('/detail', (req, res) => {
 
 // GET /stream?slug=zootopia-SxDV9XZ5kg6
 // GET /stream?slug=nesting-8urWu5BPho7&se=1&ep=3
+// GET /stream?slug=the-simpsons-2nXz41q46j9&se=1&ep=1&lang=fr  (dub by lang code)
 app.get('/stream', (req, res) => {
-  const { slug, se, ep } = req.query;
+  const { slug, se, ep, lang } = req.query;
   if (!slug) return res.status(400).json({ error: 'slug is required' });
-  extractStreams(slug, se || '', ep || '')
+  extractStreams(slug, se, ep, lang)
     .then(result => res.json(result))
     .catch(err => res.status(500).json({ error: err.message }));
 });
