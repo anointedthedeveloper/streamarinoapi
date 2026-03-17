@@ -7,6 +7,13 @@ const PORT = process.env.PORT || 7860;
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
+const cache = new Map();
+function cached(key, ttlMs, fn) {
+  const hit = cache.get(key);
+  if (hit && Date.now() < hit.exp) return Promise.resolve(hit.val);
+  return fn().then(val => { cache.set(key, { val, exp: Date.now() + ttlMs }); return val; });
+}
+
 function get(hostname, path, useHttp = false) {
   return new Promise((resolve, reject) => {
     const mod = useHttp ? http : https;
@@ -227,25 +234,30 @@ async function extractStreams(slug, se, ep, lang, quality) {
 }
 
 app.get('/home', (req, res) => {
-  getHome().then(sections => res.json({ sections })).catch(err => res.status(500).json({ error: err.message }));
+  cached('home', 5 * 60 * 1000, getHome)
+    .then(sections => res.json({ sections })).catch(err => res.status(500).json({ error: err.message }));
 });
 
 app.get('/search', (req, res) => {
   const { q } = req.query;
   if (!q) return res.status(400).json({ error: 'q is required' });
-  search(q).then(results => res.json({ results })).catch(err => res.status(500).json({ error: err.message }));
+  cached(`search:${q}`, 10 * 60 * 1000, () => search(q))
+    .then(results => res.json({ results })).catch(err => res.status(500).json({ error: err.message }));
 });
 
 app.get('/detail', (req, res) => {
   const { slug } = req.query;
   if (!slug) return res.status(400).json({ error: 'slug is required' });
-  getDetail(slug).then(d => res.json(d)).catch(err => res.status(500).json({ error: err.message }));
+  cached(`detail:${slug}`, 10 * 60 * 1000, () => getDetail(slug))
+    .then(d => res.json(d)).catch(err => res.status(500).json({ error: err.message }));
 });
 
 app.get('/stream', (req, res) => {
   const { slug, se, ep, lang, quality } = req.query;
   if (!slug) return res.status(400).json({ error: 'slug is required' });
-  extractStreams(slug, se, ep, lang, quality).then(r => res.json(r)).catch(err => res.status(500).json({ error: err.message }));
+  const key = `stream:${slug}:${se}:${ep}:${lang}:${quality}`;
+  cached(key, 2 * 60 * 1000, () => extractStreams(slug, se, ep, lang, quality))
+    .then(r => res.json(r)).catch(err => res.status(500).json({ error: err.message }));
 });
 
 app.get('/', (req, res) => res.json({
