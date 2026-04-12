@@ -248,7 +248,7 @@ app.get('/debug/play', async (req, res) => {
     const finalSe = isMovie ? '0' : (se || '1');
     const finalEp = isMovie ? '0' : (ep ? String(parseInt(ep) - 1) : '0');
     const playPath = `/wefeed-h5api-bff/subject/play?subjectId=${detail.subjectId}&se=${finalSe}&ep=${finalEp}&detailPath=${detail.slug}`;
-    const raw = await get('h5-api.aoneroom.com', playPath);
+    const raw = await getPlay(detail.slug, playPath, null, detail.subjectId, finalSe, finalEp);
     res.json(JSON.parse(raw));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -265,7 +265,7 @@ app.get('/playurl', (req, res) => {
   });
 });
 
-app.get('/version', (req, res) => res.json({ version: '1.4.0' }));
+app.get('/version', (req, res) => res.json({ version: '1.5.0' }));
 
 app.get('/home', (req, res) => {
   cached('home', 5 * 60 * 1000, getHome)
@@ -296,7 +296,7 @@ app.get('/stream', (req, res) => {
 
 app.get('/', (req, res) => res.json({
   name: 'Movie Stream API',
-  version: '1.4.0',
+  version: '1.5.0',
   endpoints: {
     'GET /home': { description: 'Homepage sections (Popular Series, Popular Movie, Anime, etc.)' },
     'GET /search': { params: { q: 'keyword' } },
