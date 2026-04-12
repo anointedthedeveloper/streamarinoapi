@@ -164,15 +164,7 @@ async function getDetail(slug) {
 }
 
 async function extractStreams(slug, se, ep, lang, quality) {
-  // Fetch detail and play API in parallel
-  const [detail, playRaw] = await Promise.all([
-    getDetail(slug),
-    (() => {
-      // We need detail first to resolve lang/dub slug — do a quick pre-fetch for play
-      // Will be re-used after detail resolves
-      return null;
-    })()
-  ]);
+  const detail = await getDetail(slug);
 
   const isMovie = detail.type === 'movie';
   const finalSe = isMovie ? (se || '0') : (se || '1');
@@ -188,14 +180,12 @@ async function extractStreams(slug, se, ep, lang, quality) {
 
   const playPath = `/wefeed-h5api-bff/subject/play?subjectId=${streamId}&se=${finalSe}&ep=${finalEp}&detailPath=${streamSlug}`;
 
-  // Fetch play + captions in parallel (captions need stream id, so play first then captions)
-  const playData = await get('123movienow.cc', playPath, false).catch(() => get('123movienow.cc', playPath, true));
+  const playData = await get('h5-api.aoneroom.com', playPath);
   const playJson = JSON.parse(playData);
   if (playJson.code !== 0) throw new Error(playJson.message || 'Failed to get streams');
 
-  const rawStreams = playJson.data.streams || [];
+  const rawStreams = playJson.data?.streams || playJson.data?.resource?.streams || [];
 
-  // Fetch captions in parallel with nothing else to wait for
   const captionsPromise = rawStreams[0]?.id
     ? get('h5-api.aoneroom.com', `/wefeed-h5api-bff/subject/caption?format=MP4&id=${rawStreams[0].id}&subjectId=${streamId}&detailPath=${streamSlug}`)
         .then(r => JSON.parse(r))
@@ -235,6 +225,20 @@ async function extractStreams(slug, se, ep, lang, quality) {
     playerUrl: `https://123movienow.cc/spa/videoPlayPage/movies/${streamSlug}?id=${streamId}&type=/movie/detail&detailSe=${finalSe}&detailEp=${finalEp}&lang=en`
   };
 }
+
+app.get('/debug/play', async (req, res) => {
+  const { slug, se, ep } = req.query;
+  if (!slug) return res.status(400).json({ error: 'slug is required' });
+  try {
+    const detail = await getDetail(slug);
+    const isMovie = detail.type === 'movie';
+    const finalSe = isMovie ? '0' : (se || '1');
+    const finalEp = isMovie ? '0' : (ep ? String(parseInt(ep) - 1) : '0');
+    const playPath = `/wefeed-h5api-bff/subject/play?subjectId=${detail.subjectId}&se=${finalSe}&ep=${finalEp}&detailPath=${detail.slug}`;
+    const raw = await get('h5-api.aoneroom.com', playPath);
+    res.json(JSON.parse(raw));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 
 app.get('/playurl', (req, res) => {
   const { slug, se, ep, subjectId } = req.query;
