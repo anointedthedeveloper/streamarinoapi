@@ -294,7 +294,7 @@ app.get('/stream', (req, res) => {
 
 app.get('/', (req, res) => res.json({
   name: 'Movie Stream API',
-  version: '1.3.0',
+  version: '1.4.0',
   endpoints: {
     'GET /home': { description: 'Homepage sections (Popular Series, Popular Movie, Anime, etc.)' },
     'GET /search': { params: { q: 'keyword' } },
