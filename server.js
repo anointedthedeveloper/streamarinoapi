@@ -37,7 +37,37 @@ function get(hostname, path) {
   });
 }
 
-function getPlay(slug, path) {
+let playToken = null;
+let playTokenExp = 0;
+
+async function getPlayToken() {
+  if (playToken && Date.now() < playTokenExp) return playToken;
+  return new Promise((resolve, reject) => {
+    https.request({
+      hostname: '123movienow.cc', path: '/',
+      headers: { 'User-Agent': UA, 'Accept': 'text/html' }
+    }, res => {
+      const setCookie = [].concat(res.headers['set-cookie'] || []);
+      let token = null;
+      for (const c of setCookie) {
+        const m = c.match(/token=([^;]+)/);
+        if (m) { token = m[1]; break; }
+      }
+      res.resume();
+      res.on('end', () => {
+        if (token) {
+          playToken = token;
+          playTokenExp = Date.now() + 90 * 60 * 1000;
+          resolve(token);
+        } else {
+          reject(new Error('Could not get play token'));
+        }
+      });
+    }).on('error', reject).end();
+  });
+}
+
+function getPlay(slug, path, token) {
   const playerUrl = `https://123movienow.cc/spa/videoPlayPage/movies/${slug}`;
   return new Promise((resolve, reject) => {
     https.request({
@@ -46,8 +76,9 @@ function getPlay(slug, path) {
         'User-Agent': UA,
         'Referer': playerUrl,
         'Accept': 'application/json',
-        'x-client-info': `{"timezone":"Africa/Lagos"}`,
-        'x-source': ''
+        'x-client-info': '{"timezone":"Africa/Lagos"}',
+        'x-source': '',
+        'cookie': `token=${token}`
       }
     }, res => {
       let d = '';
@@ -177,7 +208,7 @@ async function getDetail(slug) {
 }
 
 async function extractStreams(slug, se, ep, lang, quality) {
-  const detail = await getDetail(slug);
+  const [detail, token] = await Promise.all([getDetail(slug), getPlayToken()]);
 
   const isMovie = detail.type === 'movie';
   const finalSe = isMovie ? (se || '0') : (se || '1');
@@ -193,7 +224,7 @@ async function extractStreams(slug, se, ep, lang, quality) {
 
   const playPath = `/wefeed-h5api-bff/subject/play?subjectId=${streamId}&se=${finalSe}&ep=${finalEp}&detailPath=${streamSlug}`;
 
-  const playData = await getPlay(streamSlug, playPath);
+  const playData = await getPlay(streamSlug, playPath, token);
   const playJson = JSON.parse(playData);
   if (playJson.code !== 0) throw new Error(playJson.message || 'Failed to get streams');
 
