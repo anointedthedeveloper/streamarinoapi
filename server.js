@@ -1,13 +1,10 @@
 const express = require('express');
 const https = require('https');
-const http = require('http');
 
 const app = express();
 const PORT = process.env.PORT || 7860;
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-
-const SESSION_UUID = 'b1c6436e-1189-429d-b563-3fba63cd3e9e';
 
 const cache = new Map();
 function cached(key, ttlMs, fn) {
@@ -16,27 +13,43 @@ function cached(key, ttlMs, fn) {
   return fn().then(val => { cache.set(key, { val, exp: Date.now() + ttlMs }); return val; });
 }
 
-function get(hostname, path, useHttp = false) {
+function get(hostname, path) {
   return new Promise((resolve, reject) => {
-    const mod = useHttp ? http : https;
-    const isPlay = hostname === '123movienow.cc';
-    mod.request({
+    https.request({
       hostname, path,
       headers: {
         'User-Agent': UA,
-        'Referer': isPlay ? 'https://123movienow.cc/' : 'https://moviebox.ph/',
-        'Origin': isPlay ? 'https://123movienow.cc' : 'https://moviebox.ph',
+        'Referer': 'https://moviebox.ph/',
+        'Origin': 'https://moviebox.ph',
         'Accept': 'application/json, text/plain, */*',
         'Accept-Language': 'en-US,en;q=0.9',
-        'x-requested-with': 'XMLHttpRequest',
-        ...(isPlay ? { 'cookie': `uuid=${SESSION_UUID}`, 'x-client-info': '{"timezone":"America/New_York"}' } : {})
+        'x-requested-with': 'XMLHttpRequest'
       }
     }, res => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        const loc = res.headers.location;
-        const u = new URL(loc);
-        return get(u.hostname, u.pathname + u.search, u.protocol === 'http:').then(resolve).catch(reject);
+        const u = new URL(res.headers.location);
+        return get(u.hostname, u.pathname + u.search).then(resolve).catch(reject);
       }
+      let d = '';
+      res.on('data', c => d += c);
+      res.on('end', () => resolve(d));
+    }).on('error', reject).end();
+  });
+}
+
+function getPlay(slug, path) {
+  const playerUrl = `https://123movienow.cc/spa/videoPlayPage/movies/${slug}`;
+  return new Promise((resolve, reject) => {
+    https.request({
+      hostname: '123movienow.cc', path,
+      headers: {
+        'User-Agent': UA,
+        'Referer': playerUrl,
+        'Accept': 'application/json',
+        'x-client-info': `{"timezone":"${Intl.DateTimeFormat().resolvedOptions().timeZone}"}`,
+        'x-source': ''
+      }
+    }, res => {
       let d = '';
       res.on('data', c => d += c);
       res.on('end', () => resolve(d));
@@ -180,7 +193,7 @@ async function extractStreams(slug, se, ep, lang, quality) {
 
   const playPath = `/wefeed-h5api-bff/subject/play?subjectId=${streamId}&se=${finalSe}&ep=${finalEp}&detailPath=${streamSlug}`;
 
-  const playData = await get('h5-api.aoneroom.com', playPath);
+  const playData = await getPlay(streamSlug, playPath);
   const playJson = JSON.parse(playData);
   if (playJson.code !== 0) throw new Error(playJson.message || 'Failed to get streams');
 
@@ -281,7 +294,7 @@ app.get('/stream', (req, res) => {
 
 app.get('/', (req, res) => res.json({
   name: 'Movie Stream API',
-  version: '1.1.0',
+  version: '1.2.0',
   endpoints: {
     'GET /home': { description: 'Homepage sections (Popular Series, Popular Movie, Anime, etc.)' },
     'GET /search': { params: { q: 'keyword' } },
