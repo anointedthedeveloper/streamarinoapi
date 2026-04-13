@@ -208,7 +208,7 @@ async function extractStreams(slug, se, ep, lang, quality) {
   try {
     playJson = JSON.parse(await getPlay(streamSlug, playPath, null, streamId, finalSe, finalEp));
   } catch (e) {
-    return { ...base, availableQualities: [], streams: [], captions: [], note: 'region blocked' };
+    return { ...base, availableQualities: [], streams: [], captions: [] };
   }
 
   if (playJson.code !== 0 || !playJson.data?.hasResource) {
@@ -265,7 +265,7 @@ app.get('/playurl', (req, res) => {
   });
 });
 
-app.get('/version', (req, res) => res.json({ version: '1.6.0' }));
+app.get('/version', (req, res) => res.json({ version: '1.7.0' }));
 
 app.get('/home', (req, res) => {
   cached('home', 5 * 60 * 1000, getHome)
@@ -296,7 +296,7 @@ app.get('/stream', (req, res) => {
 
 app.get('/', (req, res) => res.json({
   name: 'Movie Stream API',
-  version: '1.6.0',
+  version: '1.7.0',
   endpoints: {
     'GET /home': { description: 'Homepage sections (Popular Series, Popular Movie, Anime, etc.)' },
     'GET /search': { params: { q: 'keyword' } },
