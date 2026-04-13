@@ -269,7 +269,7 @@ app.get('/playurl', (req, res) => {
   });
 });
 
-app.get('/version', (req, res) => res.json({ version: '1.7.0' }));
+app.get('/version', (req, res) => res.json({ version: '1.8.0' }));
 
 app.get('/home', (req, res) => {
   cached('home', 5 * 60 * 1000, getHome)
@@ -300,7 +300,7 @@ app.get('/stream', (req, res) => {
 
 app.get('/', (req, res) => res.json({
   name: 'Movie Stream API',
-  version: '1.7.0',
+  version: '1.8.0',
   endpoints: {
     'GET /home': { description: 'Homepage sections (Popular Series, Popular Movie, Anime, etc.)' },
     'GET /search': { params: { q: 'keyword' } },
